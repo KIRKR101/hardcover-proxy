@@ -1,0 +1,13 @@
+{
+  "name": "hardcover-proxy",
+  "version": "1.0.0",
+  "main": "src/worker.ts",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.7.3"
+  }
+}

@@ -36,6 +36,13 @@ interface CurrentlyReadingItem {
   user_book_reads: Array<{ progress_pages: number | null }>;
 }
 
+interface ReadingJournalEntry {
+  id: number;
+  action_at: string;
+  event: string;
+  entry: string | null;
+}
+
 interface PreviouslyReadItem {
   id: number;
   status_id: number;
@@ -99,6 +106,28 @@ const CURRENTLY_READING_QUERY = `
               name
             }
           }
+        }
+      }
+    }
+  }
+`;
+
+const LAST_READ_EVENTS_QUERY = `
+  query LastReadEvents {
+    me {
+      user_books(
+        where: { status_id: { _eq: 2 } }
+      ) {
+        id
+        reading_journals(
+          where: { event: { _in: ["progress_updated", "status_currently_reading"] } },
+          order_by: { action_at: desc },
+          limit: 1
+        ) {
+          id
+          action_at
+          event
+          entry
         }
       }
     }
@@ -180,7 +209,7 @@ async function fetchHardcover(token: string, query: string): Promise<any> {
   return result.data;
 }
 
-function mapCurrentlyReading(item: CurrentlyReadingItem) {
+function mapCurrentlyReading(item: CurrentlyReadingItem, lastReadEvent: ReadingJournalEntry | null) {
   const progressPages = item.user_book_reads?.[0]?.progress_pages;
   const totalPages = item.edition?.pages || item.book.pages;
   const percentage =
@@ -222,6 +251,13 @@ function mapCurrentlyReading(item: CurrentlyReadingItem) {
       total_pages: totalPages,
       percentage,
     },
+    last_read_event: lastReadEvent
+      ? {
+          event: lastReadEvent.event,
+          action_at: lastReadEvent.action_at,
+          entry: lastReadEvent.entry,
+        }
+      : null,
   };
 }
 
@@ -295,10 +331,11 @@ export default {
     }
 
     try {
-      const [currentlyReadingData, previouslyReadData] =
+      const [currentlyReadingData, previouslyReadData, lastReadEventsData] =
         await Promise.all([
           fetchHardcover(env.HARDCOVER_API_KEY, CURRENTLY_READING_QUERY),
           fetchHardcover(env.HARDCOVER_API_KEY, PREVIOUSLY_READ_QUERY),
+          fetchHardcover(env.HARDCOVER_API_KEY, LAST_READ_EVENTS_QUERY),
         ]);
 
       if (!currentlyReadingData?.me?.[0]) {
@@ -308,13 +345,20 @@ export default {
       const me = currentlyReadingData.me[0];
       const previouslyReadMe = previouslyReadData?.me?.[0];
 
+      const lastReadEvents = new Map<number, ReadingJournalEntry>();
+      for (const ub of lastReadEventsData?.me?.[0]?.user_books || []) {
+        if (ub.reading_journals?.[0]) {
+          lastReadEvents.set(ub.id, ub.reading_journals[0]);
+        }
+      }
+
       const responseData = {
         user: {
           id: me.id,
           username: me.username,
         },
-        currently_reading: (me.user_books || []).map(
-          mapCurrentlyReading
+        currently_reading: (me.user_books || []).map((item: CurrentlyReadingItem) =>
+          mapCurrentlyReading(item, lastReadEvents.get(item.id) || null)
         ),
         previously_read: (previouslyReadMe?.user_books || []).map(
           mapPreviouslyRead
